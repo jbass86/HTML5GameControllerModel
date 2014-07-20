@@ -1,5 +1,11 @@
-
-
+// Name: GameControllerModel
+// Author: Josh Bass
+// Description: This implementation of a backbone model handles polling 1 or more
+// game controllers for the user and delivering information about the devices inputs
+// in such a way that specific buttons or axes can be registered for by the user.
+// All aspects of how the information is collected by this model are configurable such
+// as the pollTime, clickTime and the axis/button maps that the model uses to sort the 
+// information obtained by the device.
 var GameControllerModel = Backbone.Model.extend({
 	
 	defaults: {
@@ -51,12 +57,19 @@ var GameControllerModel = Backbone.Model.extend({
 		if (options.clickTime){
 			this.set("clickTime", options.clickTime);
 		}
+		if (options.axisMap){
+			this.set("axisMap", options.axisMap);
+		}
+		if (options.buttonMap){
+			this.set("buttonMap", options.buttonMap);
+		}
 
 		var webkitSupport = !!navigator.webkitGetGamepads || 
 	   	!!navigator.webkitGamepads;
 		var isFireFox = (navigator.userAgent.indexOf('Firefox/') != -1);
 		self.gamepadSupportAvailable = (webkitSupport || isFireFox);
-		if (webkitSupport){
+		if (webkitSupport && !options.axisMap){
+			//do not overwrite the axis map if the user specified their own
 			this.set("axisMap", this.get("axisMapWebkit"));
 		}
 
@@ -117,7 +130,7 @@ var GameControllerModel = Backbone.Model.extend({
 		
 		self.reconnectInterval = window.setInterval(function(){
 			
-			//a joystick has been plugged in
+			//a gamepad has been detected if we pass this check
 			if (navigator.getGamepads().length > 0){
 				self.startPollingDevice();
 				window.clearInterval(self.reconnectInterval);
@@ -132,11 +145,33 @@ var GameControllerModel = Backbone.Model.extend({
 
 			self.buttonPressed(this.get("buttonMap")[i], i, gamepad.buttons[i].value, id);
 
-			if (self.lastButtons[i] == 1 && self.lastButtons[i] != gamepad.buttons[i].value){
-				self.buttonClicked(this.get("buttonMap")[i], i, id);
+			if (self.lastButtons[i] && self.lastButtons[i].value == 1 && 
+				self.lastButtons[i].value != gamepad.buttons[i].value){
+				
+				//Before we send a click event we must determine if this button has
+				//been held down longer than the specified click time.
+				var currentTime = Date.now();
+				if (self.lastButtons[i].initialClickTime && 
+					currentTime - self.lastButtons[i].initialClickTime <= self.get("clickTime")){
+					self.buttonClicked(this.get("buttonMap")[i], i, id);
+				}
 			}
 
-			self.lastButtons[i] = gamepad.buttons[i].value;
+			if (!self.lastButtons[i]){
+				self.lastButtons[i] = {value: gamepad.buttons[i].value};
+			}else{
+				self.lastButtons[i].value = gamepad.buttons[i].value
+			}
+
+			//This logic is meant to be used to keep track of the exact time
+			//when a specific controller button was first pushed
+			if (self.lastButtons[i].value){ 
+				if (!self.lastButtons[i].initialClickTime){
+					self.lastButtons[i].initialClickTime = Date.now();
+				}
+			}else{
+				self.lastButtons[i].initialClickTime = undefined;
+			}
 		}
 	},
 	
@@ -149,7 +184,7 @@ var GameControllerModel = Backbone.Model.extend({
 
 	buttonPressed: function(button, index, isPressed, gamepadId){
 
-		if (isPressed != this.lastButtons[index]){
+		if (this.lastButtons[index] && isPressed != this.lastButtons[index].value){
 			this.set("buttonPress", {button: button, butonIndex: index, gamepadId: 
 				gamepadId, isPressed: (isPressed == 1 ? true : false)}); 
 		}
